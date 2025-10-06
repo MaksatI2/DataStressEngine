@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Loader, CheckCircle, XCircle, Trash2, Plus } from 'lucide-react';
+import { Play, Loader, CheckCircle, XCircle, Trash2, Plus, Clock, Activity, TrendingUp, Calendar } from 'lucide-react';
 
 export default function K6Dashboard() {
   const [config, setConfig] = useState({
@@ -88,6 +88,19 @@ export default function K6Dashboard() {
     } finally {
       setIsRunning(false);
     }
+  };
+
+  const formatDateTime = (isoString) => {
+    if (!isoString) return 'N/A';
+    const date = new Date(isoString);
+    return date.toLocaleString('ru-RU', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
   };
 
   return (
@@ -231,50 +244,143 @@ export default function K6Dashboard() {
               <h2 className="text-3xl font-bold text-white">Результаты теста</h2>
             </div>
 
+            {(results.startTime || results.endTime) && (
+              <div className="bg-white/5 rounded-xl p-4 border border-white/20 mb-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <Calendar className="text-purple-300" size={20} />
+                  <h3 className="text-white font-semibold">Время выполнения</h3>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-purple-300 text-sm mb-1">Начало теста</p>
+                    <p className="text-white font-mono text-sm">{formatDateTime(results.startTime)}</p>
+                  </div>
+                  <div>
+                    <p className="text-purple-300 text-sm mb-1">Конец теста</p>
+                    <p className="text-white font-mono text-sm">{formatDateTime(results.endTime)}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-              <div className="bg-white/5 rounded-xl p-4 border border-white/20">
-                <p className="text-purple-300 text-sm mb-1">Время выполнения</p>
+              <div className="bg-gradient-to-br from-blue-500/20 to-blue-600/10 rounded-xl p-4 border border-blue-500/30">
+                <div className="flex items-center gap-2 mb-2">
+                  <Clock className="text-blue-300" size={18} />
+                  <p className="text-blue-300 text-sm">Длительность</p>
+                </div>
                 <p className="text-white text-2xl font-bold">{results.duration}s</p>
               </div>
-              <div className="bg-white/5 rounded-xl p-4 border border-white/20">
-                <p className="text-purple-300 text-sm mb-1">Всего запросов</p>
+              
+              <div className="bg-gradient-to-br from-purple-500/20 to-purple-600/10 rounded-xl p-4 border border-purple-500/30">
+                <div className="flex items-center gap-2 mb-2">
+                  <Activity className="text-purple-300" size={18} />
+                  <p className="text-purple-300 text-sm">Всего запросов</p>
+                </div>
                 <p className="text-white text-2xl font-bold">{results.totalRequests}</p>
               </div>
-              <div className="bg-white/5 rounded-xl p-4 border border-white/20">
-                <p className="text-green-300 text-sm mb-1">Успешно</p>
+              
+              <div className="bg-gradient-to-br from-green-500/20 to-green-600/10 rounded-xl p-4 border border-green-500/30">
+                <div className="flex items-center gap-2 mb-2">
+                  <CheckCircle className="text-green-300" size={18} />
+                  <p className="text-green-300 text-sm">Успешно</p>
+                </div>
                 <p className="text-white text-2xl font-bold">{results.successRequests}</p>
               </div>
-              <div className="bg-white/5 rounded-xl p-4 border border-white/20">
-                <p className="text-red-300 text-sm mb-1">Ошибок</p>
+              
+              <div className="bg-gradient-to-br from-red-500/20 to-red-600/10 rounded-xl p-4 border border-red-500/30">
+                <div className="flex items-center gap-2 mb-2">
+                  <XCircle className="text-red-300" size={18} />
+                  <p className="text-red-300 text-sm">Ошибок</p>
+                </div>
                 <p className="text-white text-2xl font-bold">{results.failedRequests}</p>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
               <div className="bg-white/5 rounded-xl p-4 border border-white/20">
-                <p className="text-purple-300 text-sm mb-1">Целевая скорость</p>
-                <p className="text-white text-xl font-bold">{results.targetRate} логов/сек</p>
+                <div className="flex items-center gap-2 mb-2">
+                  <TrendingUp className="text-cyan-300" size={18} />
+                  <p className="text-purple-300 text-sm">Целевая скорость</p>
+                </div>
+                <p className="text-white text-xl font-bold">{results.targetRate} лог/сек</p>
               </div>
+              
               <div className="bg-white/5 rounded-xl p-4 border border-white/20">
-                <p className="text-purple-300 text-sm mb-1">Фактическая скорость</p>
-                <p className="text-white text-xl font-bold">{results.actualRate} логов/сек</p>
+                <div className="flex items-center gap-2 mb-2">
+                  <TrendingUp className="text-cyan-300" size={18} />
+                  <p className="text-purple-300 text-sm">Фактическая скорость</p>
+                </div>
+                <p className="text-white text-xl font-bold">{results.actualRate} лог/сек</p>
+                {Math.abs(parseFloat(results.actualRate) - results.targetRate) > 5 && (
+                  <p className="text-yellow-300 text-xs mt-1">
+                    ⚠ Отклонение от цели
+                  </p>
+                )}
               </div>
+              
               <div className="bg-white/5 rounded-xl p-4 border border-white/20">
-                <p className="text-purple-300 text-sm mb-1">Успешность</p>
+                <div className="flex items-center gap-2 mb-2">
+                  <Activity className="text-cyan-300" size={18} />
+                  <p className="text-purple-300 text-sm">Успешность</p>
+                </div>
                 <p className="text-white text-xl font-bold">{results.successRate}%</p>
-              </div>
-              <div className="bg-white/5 rounded-xl p-4 border border-white/20">
-                <p className="text-purple-300 text-sm mb-1">Интеграций</p>
-                <p className="text-white text-xl font-bold">{results.integrations}</p>
+                <div className="w-full bg-white/10 rounded-full h-2 mt-2">
+                  <div 
+                    className="bg-gradient-to-r from-green-500 to-green-400 h-2 rounded-full transition-all duration-500"
+                    style={{ width: `${results.successRate}%` }}
+                  />
+                </div>
               </div>
             </div>
 
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              {results.avgRequestDuration && (
+                <div className="bg-white/5 rounded-xl p-4 border border-white/20">
+                  <p className="text-purple-300 text-sm mb-1">Средняя длительность</p>
+                  <p className="text-white text-lg font-bold">{results.avgRequestDuration}ms</p>
+                </div>
+              )}
+              
+              {results.p95Duration && (
+                <div className="bg-white/5 rounded-xl p-4 border border-white/20">
+                  <p className="text-purple-300 text-sm mb-1">P95 длительность</p>
+                  <p className="text-white text-lg font-bold">{results.p95Duration}ms</p>
+                </div>
+              )}
+              
+              {results.maxDuration && (
+                <div className="bg-white/5 rounded-xl p-4 border border-white/20">
+                  <p className="text-purple-300 text-sm mb-1">Макс. длительность</p>
+                  <p className="text-white text-lg font-bold">{results.maxDuration}ms</p>
+                </div>
+              )}
+              
+              <div className="bg-white/5 rounded-xl p-4 border border-white/20">
+                <p className="text-purple-300 text-sm mb-1">Интеграций</p>
+                <p className="text-white text-lg font-bold">{results.integrations}</p>
+              </div>
+            </div>
+
+            {results.warning && (
+              <div className="bg-yellow-500/20 border border-yellow-500/50 rounded-xl p-4 mb-6">
+                <div className="flex items-center gap-2">
+                  <span className="text-yellow-300 text-xl">⚠</span>
+                  <p className="text-yellow-200 text-sm">{results.warning}</p>
+                </div>
+              </div>
+            )}
+
             {results.output && (
-              <div className="mt-6 bg-black/30 rounded-xl p-4 border border-white/10">
-                <p className="text-purple-300 text-sm mb-2 font-semibold">Вывод K6:</p>
-                <pre className="text-white text-xs font-mono whitespace-pre-wrap">
-                  {results.output}
-                </pre>
+              <div className="bg-black/30 rounded-xl border border-white/10 overflow-hidden">
+                <div className="bg-white/5 px-4 py-2 border-b border-white/10">
+                  <p className="text-purple-300 text-sm font-semibold">Детальный вывод K6</p>
+                </div>
+                <div className="p-4 max-h-96 overflow-y-auto">
+                  <pre className="text-green-300 text-xs font-mono whitespace-pre-wrap">
+                    {results.output}
+                  </pre>
+                </div>
               </div>
             )}
           </div>

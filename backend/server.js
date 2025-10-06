@@ -174,13 +174,17 @@ export class LogEntry {
 
   const mainScriptContent = `import http from 'k6/http';
 import { check } from 'k6';
-import { Rate } from 'k6/metrics';
+import { Counter, Trend } from 'k6/metrics';
 import { TOTAL_LOGS, LOGS_PER_SECOND, WEBHOOK_URL, TOKENS } from './constants.js';
 import { RandomGenerator } from './utils.js';
 import { LogEntry } from './logentry.js';
 
-const errorRate = new Rate('errors');
-let globalCounter = 0;
+const successCounter = new Counter('success_requests');
+const failedCounter = new Counter('failed_requests');
+const requestDuration = new Trend('request_duration');
+
+let testStartTime;
+let testEndTime;
 
 export const options = {
     scenarios: {
@@ -195,25 +199,21 @@ export const options = {
     },
     thresholds: {
         http_req_duration: ['p(95)<2000'],
-        errors: ['rate<0.1'],
+        'failed_requests': ['count<100'],
     },
 };
 
-export default function() {
-    if (globalCounter >= TOTAL_LOGS) {
-        return false;
-    }
-    
-    globalCounter++;
-    const currentLog = globalCounter;
-    
-    if (currentLog > TOTAL_LOGS) {
-        return false;
-    }
-    
+export function setup() {
+    testStartTime = new Date().toISOString();
+    console.log('TEST_START_TIME=' + testStartTime);
+    return { startTime: testStartTime };
+}
+
+export default function(data) {
     const token = RandomGenerator.choice(TOKENS);
     const logEntry = LogEntry.generate();
     
+    const startRequest = Date.now();
     const response = http.post(
         WEBHOOK_URL,
         JSON.stringify(logEntry),
@@ -225,40 +225,74 @@ export default function() {
             timeout: '30s',
         }
     );
+    const duration = Date.now() - startRequest;
+    
+    requestDuration.add(duration);
     
     const success = check(response, {
         'status is 200-202': (r) => r.status >= 200 && r.status <= 202,
     });
     
-    if (!success) {
-        errorRate.add(1);
+    if (success) {
+        successCounter.add(1);
+    } else {
+        failedCounter.add(1);
     }
-    
-    return success;
+}
+
+export function teardown(data) {
+    testEndTime = new Date().toISOString();
+    console.log('TEST_END_TIME=' + testEndTime);
 }
 
 export function handleSummary(data) {
-    const duration = (data.state && data.state.testRunDurationMs) ? data.state.testRunDurationMs / 1000 : 0;
-    const totalRequests = (data.metrics.http_reqs && data.metrics.http_reqs.values && data.metrics.http_reqs.values.count) || 0;
-    const failedRequests = (data.metrics.http_req_failed && data.metrics.http_req_failed.values && data.metrics.http_req_failed.values.passes) || 0;
-    const successRequests = totalRequests - failedRequests;
-    const actualRate = duration > 0 ? (totalRequests / duration).toFixed(2) : 0;
-    const successRate = totalRequests > 0 ? ((successRequests / totalRequests) * 100).toFixed(1) : 0;
+    const metrics = data.metrics;
     
-    console.log('TEST_RESULTS_START');
-    console.log(JSON.stringify({
-        duration: duration.toFixed(2),
-        totalRequests,
-        failedRequests,
-        successRequests,
+    const httpReqs = (metrics.http_reqs && metrics.http_reqs.values && metrics.http_reqs.values.count) || 0;
+    const successReqs = (metrics.success_requests && metrics.success_requests.values && metrics.success_requests.values.count) || 0;
+    const failedReqs = (metrics.failed_requests && metrics.failed_requests.values && metrics.failed_requests.values.count) || 0;
+    
+    const iterDuration = (metrics.iteration_duration && metrics.iteration_duration.values && metrics.iteration_duration.values.avg) || 0;
+    
+    let totalDuration = 0;
+    if (data.state && data.state.testRunDurationMs) {
+        totalDuration = data.state.testRunDurationMs / 1000;
+    } else if (metrics.vus && metrics.vus.values && metrics.vus.values.max) {
+        totalDuration = Math.ceil(TOTAL_LOGS / LOGS_PER_SECOND);
+    }
+    
+    const actualRate = totalDuration > 0 ? (httpReqs / totalDuration).toFixed(2) : '0';
+    
+    const successRate = httpReqs > 0 ? ((successReqs / httpReqs) * 100).toFixed(1) : '0';
+    
+    const avgDuration = (metrics.http_req_duration && metrics.http_req_duration.values && metrics.http_req_duration.values.avg) || 0;
+    
+    const p95Duration = (metrics.http_req_duration && metrics.http_req_duration.values && metrics.http_req_duration.values['p(95)']) || 0;
+    const maxDuration = (metrics.http_req_duration && metrics.http_req_duration.values && metrics.http_req_duration.values.max) || 0;
+    
+    const results = {
+        startTime: testStartTime || new Date().toISOString(),
+        endTime: testEndTime || new Date().toISOString(),
+        duration: totalDuration.toFixed(2),
+        totalRequests: httpReqs,
+        successRequests: successReqs,
+        failedRequests: failedReqs,
         targetRate: LOGS_PER_SECOND,
-        actualRate,
-        successRate,
-        integrations: TOKENS.length
-    }));
-    console.log('TEST_RESULTS_END');
+        actualRate: actualRate,
+        successRate: successRate,
+        avgRequestDuration: avgDuration.toFixed(2),
+        integrations: TOKENS.length,
+        p95Duration: p95Duration.toFixed(2),
+        maxDuration: maxDuration.toFixed(2),
+    };
     
-    return { 'stdout': '' };
+    console.log('===TEST_RESULTS_START===');
+    console.log(JSON.stringify(results, null, 2));
+    console.log('===TEST_RESULTS_END===');
+    
+    return {
+        'stdout': JSON.stringify(results, null, 2)
+    };
 }`;
 
   fs.writeFileSync(path.join(K6_TESTS_DIR, 'constants.js'), constantsContent);
@@ -281,38 +315,57 @@ app.post('/api/run-test', (req, res) => {
     const command = `k6 run ${testScript}`;
 
     exec(command, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
-      if (error && !stdout.includes('TEST_RESULTS_START')) {
-        console.error('K6 execution error:', error);
-        return res.status(500).json({ 
-          error: 'Ошибка выполнения теста',
-          details: stderr || error.message 
-        });
-      }
+      console.log('=== K6 Output ===');
+      console.log(stdout);
+      console.log('=== K6 Stderr ===');
+      console.log(stderr);
 
-      const resultsMatch = stdout.match(/TEST_RESULTS_START\n(.*?)\nTEST_RESULTS_END/s);
+      const resultsMatch = stdout.match(/===TEST_RESULTS_START===([\s\S]*?)===TEST_RESULTS_END===/);
       
-      if (resultsMatch) {
+      if (resultsMatch && resultsMatch[1]) {
         try {
-          const results = JSON.parse(resultsMatch[1]);
+          const results = JSON.parse(resultsMatch[1].trim());
           return res.json({
             ...results,
             output: stdout
           });
         } catch (parseError) {
           console.error('Parse error:', parseError);
+          console.error('Matched content:', resultsMatch[1]);
         }
       }
 
+      const startTimeMatch = stdout.match(/TEST_START_TIME=(.+)/);
+      const endTimeMatch = stdout.match(/TEST_END_TIME=(.+)/);
+      
+      const httpReqsMatch = stdout.match(/http_reqs[.\s]+(\d+)/);
+      const httpReqDurationMatch = stdout.match(/http_req_duration[.\s]+avg=([0-9.]+)ms/);
+      const httpReqFailedMatch = stdout.match(/http_req_failed[.\s]+([0-9.]+)%/);
+
+      const totalRequests = httpReqsMatch ? parseInt(httpReqsMatch[1]) : 0;
+      const avgDuration = httpReqDurationMatch ? parseFloat(httpReqDurationMatch[1]) : 0;
+      const failedPercent = httpReqFailedMatch ? parseFloat(httpReqFailedMatch[1]) : 0;
+      
+      const failedRequests = Math.round(totalRequests * failedPercent / 100);
+      const successRequests = totalRequests - failedRequests;
+      const duration = Math.ceil(config.totalLogs / config.logsPerSecond);
+      const actualRate = duration > 0 ? (totalRequests / duration).toFixed(2) : '0';
+      const successRate = totalRequests > 0 ? ((successRequests / totalRequests) * 100).toFixed(1) : '0';
+
       return res.json({
-        duration: '0',
-        totalRequests: 0,
-        failedRequests: 0,
-        successRequests: 0,
+        startTime: startTimeMatch ? startTimeMatch[1] : new Date().toISOString(),
+        endTime: endTimeMatch ? endTimeMatch[1] : new Date().toISOString(),
+        duration: duration.toFixed(2),
+        totalRequests,
+        successRequests,
+        failedRequests,
         targetRate: config.logsPerSecond,
-        actualRate: '0',
-        successRate: '0',
+        actualRate,
+        successRate,
+        avgRequestDuration: avgDuration.toFixed(2),
         integrations: config.selectedTokens.length,
-        output: stdout
+        output: stdout,
+        warning: 'Результаты извлечены из текстового вывода'
       });
     });
   } catch (error) {
