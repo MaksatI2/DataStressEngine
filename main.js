@@ -95,8 +95,5 @@ export function handleSummary(data) {
     }
     console.log('='.repeat(60) + '\n');
     
-    return {
-        'stdout': '',
-        'summary.json': JSON.stringify(data, null, 2),
-    };
+    return { 'stdout': '' };
 }
