@@ -1,10 +1,4 @@
 import { TOTAL_LOGS, LOGS_PER_SECOND, TOKENS } from './config/Constants.js';
-import { PerformanceMetrics } from './metrics/PerformanceMetrics.js';
-import { LogSender } from './services/LogSender.js';
-
-const performanceMetrics = new PerformanceMetrics();
-const errorRate = performanceMetrics.getErrorRate();
-const logSender = new LogSender(errorRate);
 
 export const options = {
     scenarios: {
@@ -42,15 +36,6 @@ export function setup() {
     testStartTime = Date.now();
     console.log(`Тест начат: ${formatDateTime(new Date(testStartTime))}`);
     return { startTime: testStartTime };
-}
-
-export default function() {
-    if (LogSender.getCounter() >= TOTAL_LOGS) {
-        return;
-    }
-    
-    logSender.send();
-    testEndTime = Date.now();
 }
 
 export function teardown(data) {
