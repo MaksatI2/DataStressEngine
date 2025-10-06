@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    environment:
+      - REACT_APP_API_URL=http://localhost:4000
+    depends_on:
+      - backend
+    networks:
+      - k6-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./backend/k6-tests:/app/k6-tests
+      - ./backend/results:/app/results
+    environment:
+      - NODE_ENV=production
+    networks:
+      - k6-network
+
+  k6:
+    image: grafana/k6:latest
+    volumes:
+      - ./backend/k6-tests:/scripts
+      - ./backend/results:/results
+    networks:
+      - k6-network
+    profiles:
+      - test
+
+networks:
+  k6-network:
+    driver: bridge
