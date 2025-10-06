@@ -238,9 +238,9 @@ export default function() {
 }
 
 export function handleSummary(data) {
-    const duration = data.state?.testRunDurationMs ? data.state.testRunDurationMs / 1000 : 0;
-    const totalRequests = data.metrics.http_reqs?.values?.count || 0;
-    const failedRequests = data.metrics.http_req_failed?.values?.passes || 0;
+    const duration = (data.state && data.state.testRunDurationMs) ? data.state.testRunDurationMs / 1000 : 0;
+    const totalRequests = (data.metrics.http_reqs && data.metrics.http_reqs.values && data.metrics.http_reqs.values.count) || 0;
+    const failedRequests = (data.metrics.http_req_failed && data.metrics.http_req_failed.values && data.metrics.http_req_failed.values.passes) || 0;
     const successRequests = totalRequests - failedRequests;
     const actualRate = duration > 0 ? (totalRequests / duration).toFixed(2) : 0;
     const successRate = totalRequests > 0 ? ((successRequests / totalRequests) * 100).toFixed(1) : 0;
