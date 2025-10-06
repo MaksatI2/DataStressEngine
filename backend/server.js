@@ -320,18 +320,55 @@ app.post('/api/run-test', (req, res) => {
       console.log('=== K6 Stderr ===');
       console.log(stderr);
 
-      const resultsMatch = stdout.match(/===TEST_RESULTS_START===([\s\S]*?)===TEST_RESULTS_END===/);
+      const stdoutJsonMatch = stdout.match(/\{[\s\S]*?"startTime"[\s\S]*?"endTime"[\s\S]*?\}/);
       
-      if (resultsMatch && resultsMatch[1]) {
+      if (stdoutJsonMatch) {
         try {
-          const results = JSON.parse(resultsMatch[1].trim());
+          const results = JSON.parse(stdoutJsonMatch[0]);
+          console.log('✅ Parsed results from stdout JSON:', results);
           return res.json({
             ...results,
             output: stdout
           });
         } catch (parseError) {
-          console.error('Parse error:', parseError);
-          console.error('Matched content:', resultsMatch[1]);
+          console.error('❌ Parse error from stdout JSON:', parseError);
+        }
+      }
+
+      const stderrLines = stderr.split('\n');
+      let jsonStartIdx = -1;
+      let jsonEndIdx = -1;
+      
+      for (let i = 0; i < stderrLines.length; i++) {
+        if (stderrLines[i].includes('===TEST_RESULTS_START===')) {
+          jsonStartIdx = i + 1;
+        }
+        if (stderrLines[i].includes('===TEST_RESULTS_END===')) {
+          jsonEndIdx = i - 1;
+          break;
+        }
+      }
+      
+      if (jsonStartIdx !== -1 && jsonEndIdx !== -1) {
+        try {
+          let jsonStr = '';
+          for (let i = jsonStartIdx; i <= jsonEndIdx; i++) {
+            const line = stderrLines[i];
+            const msgMatch = line.match(/msg="(.*)"/);
+            if (msgMatch) {
+              jsonStr += msgMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"');
+            }
+          }
+          
+          console.log('📝 Extracted JSON string:', jsonStr);
+          const results = JSON.parse(jsonStr);
+          console.log('✅ Parsed results from stderr:', results);
+          return res.json({
+            ...results,
+            output: stdout
+          });
+        } catch (parseError) {
+          console.error('❌ Parse error from stderr:', parseError);
         }
       }
 
