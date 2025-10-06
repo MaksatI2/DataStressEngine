@@ -4,7 +4,6 @@ import { TOKENS, WEBHOOK_URL } from '../config/Constants.js';
 import { RandomGenerator } from '../utils/RandomGenerator.js';
 import { LogEntry } from '../models/LogEntry.js';
 import { TOTAL_LOGS } from '../config/Constants.js';
-import { SharedArray } from 'k6/data';
 
 let globalCounter = 0;
 
