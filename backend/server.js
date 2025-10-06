@@ -1,0 +1,332 @@
+const express = require('express');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+const fs = require('fs');
+const path = require('path');
+const { exec } = require('child_process');
+
+const app = express();
+const PORT = 4000;
+
+app.use(cors());
+app.use(bodyParser.json());
+
+const K6_TESTS_DIR = path.join(__dirname, 'k6-tests');
+const RESULTS_DIR = path.join(__dirname, 'results');
+
+if (!fs.existsSync(K6_TESTS_DIR)) {
+  fs.mkdirSync(K6_TESTS_DIR, { recursive: true });
+}
+
+if (!fs.existsSync(RESULTS_DIR)) {
+  fs.mkdirSync(RESULTS_DIR, { recursive: true });
+}
+
+function generateK6Script(config) {
+  const constantsContent = `export const WEBHOOK_URL = "${config.webhookUrl}";
+
+export const TOKENS = ${JSON.stringify(config.selectedTokens, null, 4)};
+
+export const TOTAL_LOGS = ${config.totalLogs};
+export const LOGS_PER_SECOND = ${config.logsPerSecond};
+
+export const SITES = ['USOAK', 'USDFW', 'USNYC', 'USSEA', 'CATOR'];
+export const DEVICE_TYPES_SHORT = ['ACDMSWE', 'RTRCOR', 'SRVAPP', 'FWDMZ'];
+export const MANUFACTURERS = ['Cisco', 'Meraki', 'Juniper', 'Dell', 'HPE'];
+export const DEVICE_TYPES = ['Switch', 'Router', 'Server', 'Firewall', 'Load Balancer'];
+export const SEVERITIES = ['info', 'warn', 'error', 'critical'];
+export const STATUSES = ['clear', 'active', 'acknowledged', 'suppressed'];
+export const ENVIRONMENTS = ['dev', 'staging', 'prod'];
+export const NETWORK_TYPES = ['Corporate', 'DMZ', 'Guest', 'Management'];
+export const SITE_NAMES = ['', 'Main Office', 'Branch Office', 'Data Center'];
+
+export const INTERFACES = [
+    'Network Interfaces-Port',
+    'CPU Utilization',
+    'Memory Usage',
+    'Disk Space',
+    'Temperature Sensors',
+    'Power Supply Status'
+];
+
+export const DATAPOINTS = {
+    'Network Interfaces-Port': {
+        datapoint: 'Status',
+        threshold: '> 1',
+        description: "Interface status monitoring"
+    },
+    'CPU Utilization': {
+        datapoint: 'CPUBusyPercent',
+        threshold: '> 90',
+        description: 'CPU utilization percentage across all cores'
+    },
+    'Memory Usage': {
+        datapoint: 'MemoryUtilization',
+        threshold: '> 85',
+        description: 'Memory usage percentage'
+    },
+    'Disk Space': {
+        datapoint: 'Status',
+        threshold: '> 1',
+        description: 'Disk space utilization monitoring'
+    }
+};`;
+
+  const randomGeneratorContent = `export class RandomGenerator {
+    static choice(arr) {
+        return arr[Math.floor(Math.random() * arr.length)];
+    }
+
+    static int(min, max) {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    static string(length, chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789') {
+        let result = '';
+        for (let i = 0; i < length; i++) {
+            result += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return result;
+    }
+
+    static serialNumber() {
+        return \`\${this.string(4)}-\${this.string(4)}-\${this.string(4)}\`;
+    }
+
+    static ipAddress() {
+        return \`\${this.int(10, 252)}.\${this.int(1, 255)}.\${this.int(1, 255)}.\${this.int(1, 255)}\`;
+    }
+
+    static boolean() {
+        return Math.random() > 0.5;
+    }
+}`;
+
+  const logEntryContent = `import { 
+    SITES, DEVICE_TYPES_SHORT, MANUFACTURERS, DEVICE_TYPES, 
+    SEVERITIES, STATUSES, ENVIRONMENTS, NETWORK_TYPES, 
+    SITE_NAMES, INTERFACES, DATAPOINTS 
+} from './constants.js';
+import { RandomGenerator } from './utils.js';
+
+export class LogEntry {
+    static generate() {
+        const site = RandomGenerator.choice(SITES);
+        const location = RandomGenerator.int(1, 999);
+        const deviceTypeShort = RandomGenerator.choice(DEVICE_TYPES_SHORT);
+        const number = RandomGenerator.int(1, 999);
+        const host = \`\${site}\${location.toString().padStart(3, '0')}\${deviceTypeShort}\${number.toString().padStart(3, '0')}\`;
+        
+        const manufacturer = RandomGenerator.choice(MANUFACTURERS);
+        const deviceType = RandomGenerator.choice(DEVICE_TYPES);
+        const poe = RandomGenerator.boolean() ? 'FP' : '';
+        const portSize = RandomGenerator.choice(['24', '48']);
+        const model = \`\${manufacturer} \${deviceType} \${portSize}\${poe}\`;
+        const deviceInfo = \`\${model} Cloud Managed \${poe ? 'PoE ' : ''}\${deviceType}\`;
+        
+        const interfaceType = RandomGenerator.choice(INTERFACES);
+        const portId = interfaceType.includes('Port') ? RandomGenerator.int(1, 48) : RandomGenerator.int(1, 10);
+        const datasourceName = interfaceType.includes('Port') 
+            ? \`\${interfaceType} \${portId} [ID:\${portId}]\`
+            : \`\${interfaceType} [ID:\${portId}]\`;
+        
+        const interfaceKey = interfaceType.split('-')[0];
+        const datapointInfo = DATAPOINTS[interfaceKey] || DATAPOINTS['Network Interfaces-Port'];
+        
+        const ip = RandomGenerator.ipAddress();
+        const serial = RandomGenerator.serialNumber();
+        const alertId = \`DS\${RandomGenerator.int(10000000, 99999999)}\`;
+        const deviceId = RandomGenerator.int(100, 9999);
+        const lmdId = \`LMD\${RandomGenerator.int(1000000, 9999999)}\`;
+        
+        return {
+            severity: RandomGenerator.choice(SEVERITIES),
+            host: host,
+            status: RandomGenerator.choice(STATUSES),
+            site_name: RandomGenerator.choice(SITE_NAMES),
+            env: RandomGenerator.choice(ENVIRONMENTS),
+            tags: {
+                device_url: \`https://acme.logicmonitor.com/santaba/uiv3/device/index.jsp#tree/-d-\${deviceId}\`,
+                url: \`https://acme.logicmonitor.com/santaba/uiv4/alert#detail~id=\${lmdId}&type=alert\`,
+                datapoint: datapointInfo.datapoint,
+                datapoint_description: datapointInfo.description,
+                datasource: datasourceName,
+                datasource_description: \`Collects \${interfaceType.toLowerCase()} performance and operational stats.\`,
+                alert_id: alertId,
+                threshold: datapointInfo.threshold,
+                host_info: deviceInfo,
+                host_ip: ip,
+                host_manufacturer: manufacturer,
+                host_model: deviceInfo,
+                host_serial_number: serial,
+                network_type: RandomGenerator.choice(NETWORK_TYPES)
+            },
+            title: \`\${host} has reported \${datasourceName} to be in alert due to \${datapointInfo.datapoint} threshold being breached.\`,
+            manager: 'Logicmonitor',
+            aiops_data: RandomGenerator.boolean(),
+            cribl_pipe: [
+                'logicmonitor',
+                RandomGenerator.choice(['passthru', 'enrichment', 'filtering'])
+            ]
+        };
+    }
+}`;
+
+  const mainScriptContent = `import http from 'k6/http';
+import { check } from 'k6';
+import { Rate } from 'k6/metrics';
+import { TOTAL_LOGS, LOGS_PER_SECOND, WEBHOOK_URL, TOKENS } from './constants.js';
+import { RandomGenerator } from './utils.js';
+import { LogEntry } from './logentry.js';
+
+const errorRate = new Rate('errors');
+let globalCounter = 0;
+
+export const options = {
+    scenarios: {
+        constant_rate: {
+            executor: 'constant-arrival-rate',
+            rate: LOGS_PER_SECOND,
+            timeUnit: '1s',
+            duration: \`\${Math.ceil(TOTAL_LOGS / LOGS_PER_SECOND)}s\`,
+            preAllocatedVUs: Math.min(LOGS_PER_SECOND * 2, 50),
+            maxVUs: Math.min(LOGS_PER_SECOND * 3, 100),
+        },
+    },
+    thresholds: {
+        http_req_duration: ['p(95)<2000'],
+        errors: ['rate<0.1'],
+    },
+};
+
+export default function() {
+    if (globalCounter >= TOTAL_LOGS) {
+        return false;
+    }
+    
+    globalCounter++;
+    const currentLog = globalCounter;
+    
+    if (currentLog > TOTAL_LOGS) {
+        return false;
+    }
+    
+    const token = RandomGenerator.choice(TOKENS);
+    const logEntry = LogEntry.generate();
+    
+    const response = http.post(
+        WEBHOOK_URL,
+        JSON.stringify(logEntry),
+        {
+            headers: {
+                'Authorization': \`Bearer \${token}\`,
+                'Content-Type': 'application/json',
+            },
+            timeout: '30s',
+        }
+    );
+    
+    const success = check(response, {
+        'status is 200-202': (r) => r.status >= 200 && r.status <= 202,
+    });
+    
+    if (!success) {
+        errorRate.add(1);
+    }
+    
+    return success;
+}
+
+export function handleSummary(data) {
+    const duration = data.state?.testRunDurationMs ? data.state.testRunDurationMs / 1000 : 0;
+    const totalRequests = data.metrics.http_reqs?.values?.count || 0;
+    const failedRequests = data.metrics.http_req_failed?.values?.passes || 0;
+    const successRequests = totalRequests - failedRequests;
+    const actualRate = duration > 0 ? (totalRequests / duration).toFixed(2) : 0;
+    const successRate = totalRequests > 0 ? ((successRequests / totalRequests) * 100).toFixed(1) : 0;
+    
+    console.log('TEST_RESULTS_START');
+    console.log(JSON.stringify({
+        duration: duration.toFixed(2),
+        totalRequests,
+        failedRequests,
+        successRequests,
+        targetRate: LOGS_PER_SECOND,
+        actualRate,
+        successRate,
+        integrations: TOKENS.length
+    }));
+    console.log('TEST_RESULTS_END');
+    
+    return { 'stdout': '' };
+}`;
+
+  fs.writeFileSync(path.join(K6_TESTS_DIR, 'constants.js'), constantsContent);
+  fs.writeFileSync(path.join(K6_TESTS_DIR, 'utils.js'), randomGeneratorContent);
+  fs.writeFileSync(path.join(K6_TESTS_DIR, 'logentry.js'), logEntryContent);
+  fs.writeFileSync(path.join(K6_TESTS_DIR, 'test.js'), mainScriptContent);
+}
+
+app.post('/api/run-test', (req, res) => {
+  const config = req.body;
+
+  if (!config.webhookUrl || !config.selectedTokens || config.selectedTokens.length === 0) {
+    return res.status(400).json({ error: 'Некорректная конфигурация' });
+  }
+
+  try {
+    generateK6Script(config);
+
+    const testScript = path.join(K6_TESTS_DIR, 'test.js');
+    const command = `k6 run ${testScript}`;
+
+    exec(command, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+      if (error && !stdout.includes('TEST_RESULTS_START')) {
+        console.error('K6 execution error:', error);
+        return res.status(500).json({ 
+          error: 'Ошибка выполнения теста',
+          details: stderr || error.message 
+        });
+      }
+
+      const resultsMatch = stdout.match(/TEST_RESULTS_START\n(.*?)\nTEST_RESULTS_END/s);
+      
+      if (resultsMatch) {
+        try {
+          const results = JSON.parse(resultsMatch[1]);
+          return res.json({
+            ...results,
+            output: stdout
+          });
+        } catch (parseError) {
+          console.error('Parse error:', parseError);
+        }
+      }
+
+      return res.json({
+        duration: '0',
+        totalRequests: 0,
+        failedRequests: 0,
+        successRequests: 0,
+        targetRate: config.logsPerSecond,
+        actualRate: '0',
+        successRate: '0',
+        integrations: config.selectedTokens.length,
+        output: stdout
+      });
+    });
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 Backend server running on port ${PORT}`);
+  console.log(`📁 K6 tests directory: ${K6_TESTS_DIR}`);
+  console.log(`📊 Results directory: ${RESULTS_DIR}`);
+});
