@@ -183,9 +183,6 @@ const successCounter = new Counter('success_requests');
 const failedCounter = new Counter('failed_requests');
 const requestDuration = new Trend('request_duration');
 
-let testStartTime;
-let testEndTime;
-
 export const options = {
     scenarios: {
         constant_rate: {
@@ -204,9 +201,9 @@ export const options = {
 };
 
 export function setup() {
-    testStartTime = new Date().toISOString();
-    console.log('TEST_START_TIME=' + testStartTime);
-    return { startTime: testStartTime };
+    const startTime = new Date().toISOString();
+    console.log('TEST_START_TIME=' + startTime);
+    return { startTime: startTime };
 }
 
 export default function(data) {
@@ -241,8 +238,9 @@ export default function(data) {
 }
 
 export function teardown(data) {
-    testEndTime = new Date().toISOString();
-    console.log('TEST_END_TIME=' + testEndTime);
+    const endTime = new Date().toISOString();
+    console.log('TEST_END_TIME=' + endTime);
+    return { endTime: endTime };
 }
 
 export function handleSummary(data) {
@@ -252,8 +250,6 @@ export function handleSummary(data) {
     const successReqs = (metrics.success_requests && metrics.success_requests.values && metrics.success_requests.values.count) || 0;
     const failedReqs = (metrics.failed_requests && metrics.failed_requests.values && metrics.failed_requests.values.count) || 0;
     
-    const iterDuration = (metrics.iteration_duration && metrics.iteration_duration.values && metrics.iteration_duration.values.avg) || 0;
-    
     let totalDuration = 0;
     if (data.state && data.state.testRunDurationMs) {
         totalDuration = data.state.testRunDurationMs / 1000;
@@ -262,17 +258,17 @@ export function handleSummary(data) {
     }
     
     const actualRate = totalDuration > 0 ? (httpReqs / totalDuration).toFixed(2) : '0';
-    
     const successRate = httpReqs > 0 ? ((successReqs / httpReqs) * 100).toFixed(1) : '0';
-    
     const avgDuration = (metrics.http_req_duration && metrics.http_req_duration.values && metrics.http_req_duration.values.avg) || 0;
-    
     const p95Duration = (metrics.http_req_duration && metrics.http_req_duration.values && metrics.http_req_duration.values['p(95)']) || 0;
     const maxDuration = (metrics.http_req_duration && metrics.http_req_duration.values && metrics.http_req_duration.values.max) || 0;
     
+    const startTimeMatch = __ENV.K6_START_TIME || new Date(Date.now() - totalDuration * 1000).toISOString();
+    const endTimeMatch = new Date().toISOString();
+    
     const results = {
-        startTime: testStartTime || new Date().toISOString(),
-        endTime: testEndTime || new Date().toISOString(),
+        startTime: startTimeMatch,
+        endTime: endTimeMatch,
         duration: totalDuration.toFixed(2),
         totalRequests: httpReqs,
         successRequests: successReqs,
@@ -312,7 +308,8 @@ app.post('/api/run-test', (req, res) => {
     generateK6Script(config);
 
     const testScript = path.join(K6_TESTS_DIR, 'test.js');
-    const command = `k6 run ${testScript}`;
+    const testStartTime = new Date().toISOString();
+    const command = `K6_START_TIME=${testStartTime} k6 run ${testScript}`;
 
     exec(command, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
       console.log('=== K6 Output ===');
@@ -365,6 +362,8 @@ app.post('/api/run-test', (req, res) => {
           console.log('✅ Parsed results from stderr:', results);
           return res.json({
             ...results,
+            startTime: testStartTime,
+            endTime: testEndTime,
             output: stdout
           });
         } catch (parseError) {
@@ -372,9 +371,6 @@ app.post('/api/run-test', (req, res) => {
         }
       }
 
-      const startTimeMatch = stdout.match(/TEST_START_TIME=(.+)/);
-      const endTimeMatch = stdout.match(/TEST_END_TIME=(.+)/);
-      
       const httpReqsMatch = stdout.match(/http_reqs[.\s]+(\d+)/);
       const httpReqDurationMatch = stdout.match(/http_req_duration[.\s]+avg=([0-9.]+)ms/);
       const httpReqFailedMatch = stdout.match(/http_req_failed[.\s]+([0-9.]+)%/);
@@ -390,8 +386,8 @@ app.post('/api/run-test', (req, res) => {
       const successRate = totalRequests > 0 ? ((successRequests / totalRequests) * 100).toFixed(1) : '0';
 
       return res.json({
-        startTime: startTimeMatch ? startTimeMatch[1] : new Date().toISOString(),
-        endTime: endTimeMatch ? endTimeMatch[1] : new Date().toISOString(),
+        startTime: testStartTime,
+        endTime: testEndTime,
         duration: duration.toFixed(2),
         totalRequests,
         successRequests,
